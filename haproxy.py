@@ -165,9 +165,9 @@ def read_callback():
       continue
 
     key_root, val_type = METRIC_TYPES[key_root]
-    key_name = METRIC_DELIM.join([key_prefix, key_root])
     val = collectd.Values(plugin=NAME, type=val_type)
-    val.type_instance = key_name
+    val.plugin_instance = key_prefix
+    val.type_instance = key_root
     val.values = [ value ]
     val.dispatch()
 

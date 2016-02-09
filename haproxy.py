@@ -16,6 +16,7 @@ RECV_SIZE = 1024
 METRIC_TYPES = {
   'qcur': 'queue_current',
   'scur': 'sessions_current',
+  'slim': 'sessions_limit',
   'stot': 'sessions_total',
   'bin': 'bytes_in',
   'bout': 'bytes_out',
@@ -28,6 +29,7 @@ METRIC_TYPES = {
   'wredis': 'redispatched',
   'chkfail': 'checks_failed',
   'downtime': 'downtime',
+  'lbtot': 'selection_total',
   'rate': 'session_rate',
   'hrsp_1xx': 'response_1xx',
   'hrsp_2xx': 'response_2xx',
@@ -38,18 +40,27 @@ METRIC_TYPES = {
   'req_rate': 'request_rate',
   'cli_abrt': 'aborts_client',
   'srv_abrt': 'aborts_server',
+  'comp_in': 'compressor_in',
+  'comp_out': 'compressor_out',
+  'comp_byp': 'compressor_byp',
+  'comp_rsp': 'compressor_resp',
   'qtime': 'queue_time_ms',
   'ctime': 'connect_time_ms',
   'rtime': 'response_time_ms',
   'ttime': 'session_time_ms',
   'Uptime_sec': 'uptime_seconds',
   'CurrConns': 'current_connections',
+  'CumConns': 'cumulative_connections',
+  'CumReq': 'cumulative_requests',
   'CurrSslConns': 'current_ssl_connections',
+  'CumSslConns': 'cumulative_ssl_connections',
   'PipesUsed': 'pipes_used',
   'PipesFree': 'pipes_free',
   'ConnRate': 'connections_rate',
   'SessRate': 'sessions_rate',
   'SslRate': 'connections_ssl_rate',
+  'CompressBpsIn': 'compression_bps_in',
+  'CompressBpsOut': 'compression_bps_out',
   'Tasks': 'tasks',
   'Run_queue': 'run_queue',
   'Idle_pct': 'CPU_percent_idle'
@@ -173,7 +184,7 @@ def get_instance_config(config_child):
 
   if not instance_config['PROXY_MONITORS']:
     instance_config['PROXY_MONITORS'] = DEFAULT_PROXY_MONITORS
-  instance_config['PROXY_MONITORS'] = [p.lower() for p in 
+  instance_config['PROXY_MONITORS'] = [p.lower() for p in
                                        instance_config['PROXY_MONITORS']]
 
   return instance_config

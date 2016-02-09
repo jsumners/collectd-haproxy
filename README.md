@@ -25,9 +25,13 @@ One or more Proxies to ignore
 File location of the HAProxy management socket
 * `Verbose`  
 Enable verbose logging
+* `Instance`
+There are situations when multiple instances of HAProxy needs to run on the same host
 
 Example
 -------
+    TypesDB "/usr/share/collectd/haproxy_types.db"
+
     <LoadPlugin python>
         Globals true
     </LoadPlugin>
@@ -42,5 +46,33 @@ Example
           Socket "/var/run/haproxy.sock"
           ProxyMonitor "server"
           ProxyMonitor "backend"
+        </Module>
+    </Plugin>
+
+Example Multi-Instance
+----------------------
+    TypesDB "/usr/share/collectd/haproxy_types.db"
+
+    <LoadPlugin python>
+        Globals true
+    </LoadPlugin>
+
+    <Plugin python>
+        # haproxy.py is at /usr/lib64/collectd/haproxy.py
+        ModulePath "/usr/lib64/collectd/"
+
+        Import "haproxy"
+
+        <Module haproxy>
+          <Instance haproxy1>
+              Socket "/var/run/haproxy1.sock"
+              ProxyMonitor "server"
+              ProxyMonitor "backend"
+          </Instance>
+          <Instance haproxy2>
+              Socket "/var/run/haproxy2.sock"
+              ProxyMonitor "server"
+              ProxyMonitor "backend"
+          </Instance>
         </Module>
     </Plugin>

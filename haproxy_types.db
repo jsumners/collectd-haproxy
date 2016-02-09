@@ -43,8 +43,8 @@ pipes_free                  value:GAUGE:0:U
 connections_rate            value:GAUGE:0:U
 session_rate                value:GAUGE:0:U
 connections_ssl_rate        value:GAUGE:0:U
-compression_bps_in          value:GUAGE:0:U
-compression_bps_out         value:GUAGE:0:U
+compression_bps_in          value:GAUGE:0:U
+compression_bps_out         value:GAUGE:0:U
 tasks                       value:GAUGE:0:U
 run_queue                   value:GAUGE:0:U
 CPU_percent_idle            value:GAUGE:0:U

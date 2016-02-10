@@ -154,7 +154,7 @@ def get_stats(instance_config):
         server_info = haproxy.get_server_info()
         server_stats = haproxy.get_server_stats()
     except socket.error, e:
-        log.warn("status err Unable to connect to HAProxy socket at %s" %
+        log.warn('status err Unable to connect to HAProxy socket at %s' %
                 config_data['HAPROXY_SOCKET'])
         return stats
 
@@ -165,7 +165,7 @@ def get_stats(instance_config):
             else:
                 key_prefix = instance_name + METRIC_DELIM + server_info['Name']
             metricname = METRIC_DELIM.join([key_prefix , key])
-            log.debug("metricname: %s" % metricname)
+            log.debug('metricname: %s' % metricname)
             try:
                 stats[metricname] = int(val)
             except (TypeError, ValueError), e:
@@ -186,7 +186,7 @@ def get_stats(instance_config):
                 key_prefix = instance_name + METRIC_DELIM + statdict['svname']
             metricname = METRIC_DELIM.join([key_prefix.lower(),
                                             statdict['pxname'].lower(), key])
-        log.debug("metricname: %s" % metricname)
+        log.debug('metricname: %s' % metricname)
         try:
             stats[metricname] = int(val)
         except (TypeError, ValueError), e:
@@ -203,15 +203,15 @@ def get_instance_config(config_child):
     }
 
     for node in config_child.children:
-        if node.key == "ProxyMonitor":
+        if node.key == 'ProxyMonitor':
             instance_config['PROXY_MONITORS'].append(node.values[0])
-        elif node.key == "ProxyIgnore":
+        elif node.key == 'ProxyIgnore':
             instance_config['PROXY_IGNORE'].append(node.values[0])
-        elif node.key == "Socket":
+        elif node.key == 'Socket':
             instance_config['HAPROXY_SOCKET'] = node.values[0]
-        elif node.key == "Verbose":
+        elif node.key == 'Verbose':
             instance_config['VERBOSE_LOGGING'] = bool(node.values[0])
-        elif node.key == "Instance":
+        elif node.key == 'Instance':
             continue
         else:
             log.warn('Unknown config key: %s' % node.key)
@@ -245,12 +245,12 @@ def read_callback():
         for config_instance in CONFIG_INSTANCES:
             info.update(get_stats(config_instance))
             if not info:
-                log.warn("%s: No data received from %s instance" %
+                log.warn('%s: No data received from %s instance' %
                         (NAME, config_instance.keys()[0]))
     else:
         info = get_stats(CONFIG_ROOT)
         if not info:
-            log.warn("%s: No data received" % NAME)
+            log.warn('%s: No data received' % NAME)
 
     for key,value in info.iteritems():
         key_prefix, key_root = key.rsplit(METRIC_DELIM,1)

@@ -182,17 +182,19 @@ def get_stats(instance_config):
                 pass
 
     for statdict in server_stats:
-        if not (statdict['svname'].lower() in config_data['PROXY_MONITORS'] or \
-                statdict['pxname'].lower() in config_data['PROXY_MONITORS']):
-            _log.debug(
-                '(svname = %s, pxname = %s) not being processed' %
-                (statdict['svname'], statdict['pxname'])
-            )
-            continue
+        if not ('all' in config_data['PROXY_MONITORS'] or \
+                '*' in config_data['PROXY_MONITORS']):
+            if not (statdict['svname'].lower() in config_data['PROXY_MONITORS'] or \
+                    statdict['pxname'].lower() in config_data['PROXY_MONITORS']):
+                _log.debug(
+                    '(svname = %s, pxname = %s) not being processed' %
+                    (statdict['svname'], statdict['pxname'])
+                )
+                continue
 
-        if statdict['pxname'] in config_data['PROXY_IGNORE']:
-            _log.debug('(pxname = %s) not being processed' % statdict['pxname'])
-            continue
+            if statdict['pxname'] in config_data['PROXY_IGNORE']:
+                _log.debug('(pxname = %s) not being processed' % statdict['pxname'])
+                continue
 
         for key, val in statdict.items():
             if instance_name == 'root':

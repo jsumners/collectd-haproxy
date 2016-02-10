@@ -17,7 +17,8 @@ Options
 -------
 * `ProxyMonitor`  
 Proxy to monitor. If unset, defaults to ['server', 'frontend', 'backend'].
-Specify multiple times to specify additional proxies
+Specify multiple times to specify additional proxies, or use either of the
+special values "all" or "*" to select all proxies
 * `ProxyIgnore`  
 One or more Proxies to ignore
  Specify multiple times to specify additional proxies

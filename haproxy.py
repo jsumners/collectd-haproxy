@@ -99,7 +99,7 @@ log = Logger('haproxy global')
 class HAProxySocket(object):
     def __init__(self, socket_file):
         self.socket_file = socket_file
-        self.log = Logger('HAProxySocket')
+        self.log = Logger('HAProxySocket', VERBOSE_LOGGING)
 
     def connect(self):
         self.log.debug('method: connect')

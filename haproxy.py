@@ -12,6 +12,7 @@ import socket
 import csv
 
 NAME = 'haproxy'
+PLUGIN_NAME = NAME
 RECV_SIZE = 1024
 METRIC_TYPES = {
   'qcur': 'queue_current',
@@ -70,16 +71,39 @@ METRIC_DELIM = '.' # for the frontend/backend stats
 
 DEFAULT_PROXY_MONITORS = [ 'server', 'frontend', 'backend' ]
 
+VERBOSE_LOGGING = False
+
+CONFIG_INSTANCES = []
+CONFIG_ROOT = {}
+
+class Logger(object):
+    def error(self, msg):
+        collectd.error('{name}: {msg}'.format(name=PLUGIN_NAME, msg=msg))
+
+    def notice(self, msg):
+        collectd.notice('{name}: {msg}'.format(name=PLUGIN_NAME, msg=msg))
+
+    def warn(self, msg):
+        collectd.warning('{name}: {msg}'.format(name=PLUGIN_NAME, msg=msg))
+
+    def debug(self, msg):
+        if VERBOSE_LOGGING:
+            collectd.info('{name}: {msg}'.format(name=PLUGIN_NAME, msg=msg))
+
+log = Logger()
+
 class HAProxySocket(object):
   def __init__(self, socket_file):
     self.socket_file = socket_file
 
   def connect(self):
+    log.debug('method: connect')
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     s.connect(self.socket_file)
     return s
 
   def communicate(self, command):
+    log.debug('method: communicate')
     ''' Send a single command to the socket and return a single response (raw string) '''
     s = self.connect()
     if not command.endswith('\n'): command += '\n'
@@ -94,6 +118,7 @@ class HAProxySocket(object):
     return result
 
   def get_server_info(self):
+    log.debug('method: get_server_info')
     result = {}
     output = self.communicate('show info')
     for line in output.splitlines():
@@ -105,6 +130,7 @@ class HAProxySocket(object):
     return result
 
   def get_server_stats(self):
+    log.debug('method: get_server_stats')
     output = self.communicate('show stat')
     #sanitize and make a list of lines
     output = output.lstrip('# ').strip()
@@ -114,7 +140,10 @@ class HAProxySocket(object):
     return result
 
 def get_stats(instance_config):
+  log.debug('function: get_stats')
   instance_name, config_data = instance_config.items()[0]
+  log.debug("instance_name: %s" % instance_name)
+  log.debug("config_data: %s" % config_data)
 
   stats = {}
   haproxy = HAProxySocket(config_data['HAPROXY_SOCKET'])
@@ -123,7 +152,7 @@ def get_stats(instance_config):
     server_info = haproxy.get_server_info()
     server_stats = haproxy.get_server_stats()
   except socket.error, e:
-    logger('warn', "status err Unable to connect to HAProxy socket at %s" %
+    log.warn("status err Unable to connect to HAProxy socket at %s" %
            config_data['HAPROXY_SOCKET'])
     return stats
 
@@ -134,6 +163,7 @@ def get_stats(instance_config):
       else:
         key_prefix = instance_name + METRIC_DELIM + server_info['Name']
       metricname = METRIC_DELIM.join([key_prefix , key])
+      log.debug("metricname: %s" % metricname)
       try:
         stats[metricname] = int(val)
       except (TypeError, ValueError), e:
@@ -154,6 +184,7 @@ def get_stats(instance_config):
         key_prefix = instance_name + METRIC_DELIM + statdict['svname']
       metricname = METRIC_DELIM.join([key_prefix.lower(),
                                      statdict['pxname'].lower(), key])
+      log.debug("metricname: %s" % metricname)
       try:
         stats[metricname] = int(val)
       except (TypeError, ValueError), e:
@@ -161,6 +192,7 @@ def get_stats(instance_config):
   return stats
 
 def get_instance_config(config_child):
+  log.debug('function: get_instance_config')
   instance_config = {
     'PROXY_MONITORS': [],
     'PROXY_IGNORE': [],
@@ -180,7 +212,7 @@ def get_instance_config(config_child):
     elif node.key == "Instance":
       continue
     else:
-      logger('warn', 'Unknown config key: %s' % node.key)
+      log.warn('Unknown config key: %s' % node.key)
 
   if not instance_config['PROXY_MONITORS']:
     instance_config['PROXY_MONITORS'] = DEFAULT_PROXY_MONITORS
@@ -190,9 +222,7 @@ def get_instance_config(config_child):
   return instance_config
 
 def configure_callback(conf):
-  global CONFIG_INSTANCES, CONFIG_ROOT
-  CONFIG_INSTANCES = []
-
+  log.debug('function: configure_callback')
   for node in conf.children:
     if node.children:
       # instance config
@@ -206,19 +236,19 @@ def configure_callback(conf):
       CONFIG_ROOT = {'root': get_instance_config(conf)}
 
 def read_callback():
-  logger('verb', "beginning read_callback")
+  log.debug('function: read_callback')
 
   if CONFIG_INSTANCES:
     info = {}
     for config_instance in CONFIG_INSTANCES:
       info.update(get_stats(config_instance))
       if not info:
-        logger('warn', "%s: No data received from %s instance" %
+        log.warn("%s: No data received from %s instance" %
                (NAME, config_instance.keys()[0]))
   else:
     info = get_stats(CONFIG_ROOT)
     if not info:
-      logger('warn', "%s: No data received" % NAME)
+      log.warn("%s: No data received" % NAME)
 
   for key,value in info.iteritems():
     key_prefix, key_root = key.rsplit(METRIC_DELIM,1)
@@ -229,17 +259,6 @@ def read_callback():
                           type=METRIC_TYPES[key_root])
     val.values = [value]
     val.dispatch()
-
-def logger(t, msg):
-    if t == 'err':
-        collectd.error('%s: %s' % (NAME, msg))
-    elif t == 'warn':
-        collectd.warning('%s: %s' % (NAME, msg))
-    elif t == 'verb':
-        if CONFIG_ROOT['root']['VERBOSE_LOGGING']:
-            collectd.info('%s: %s' % (NAME, msg))
-    else:
-        collectd.notice('%s: %s' % (NAME, msg))
 
 collectd.register_config(configure_callback)
 collectd.register_read(read_callback)

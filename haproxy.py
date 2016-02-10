@@ -151,7 +151,10 @@ class HAProxySocket(object):
 def get_stats(instance_config):
     log.debug('function: get_stats')
     instance_name, config_data = instance_config.items()[0]
-    _log = config_data['log']
+    try:
+        _log = config_data['log']
+    except:
+        _log = log
     _log.debug("instance_name: %s" % instance_name)
     _log.debug("config_data: %s" % config_data)
 

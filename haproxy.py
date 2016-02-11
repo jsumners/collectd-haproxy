@@ -7,13 +7,20 @@
 # Plugin structure and logging func taken from:
 # https://github.com/phrawzty/rabbitmq-collectd-plugin
 
+# James Sumners Note:
+# The base of this plugin is indeed taken from the aforementioned original
+# source. It also includes work from GitHub user "zerthimon", namely, the
+# multi-instance support. But the end result is almost a complete rewrite
+# to simplify some things and add in threading.
+
 import collectd
 import socket
 import csv
+import threading
 
-NAME = 'haproxy'
-PLUGIN_NAME = NAME
-RECV_SIZE = 1024
+PLUGIN_NAME='haproxy'
+METRIC_DELIM='.'
+
 METRIC_TYPES = {
     'qcur': 'queue_current',
     'scur': 'sessions_current',
@@ -67,63 +74,118 @@ METRIC_TYPES = {
     'Idle_pct': 'CPU_percent_idle'
 }
 
-METRIC_DELIM = '.' # for the frontend/backend stats
-
-DEFAULT_PROXY_MONITORS = [ 'server', 'frontend', 'backend' ]
-
-VERBOSE_LOGGING = False
-
-CONFIG_INSTANCES = []
-CONFIG_ROOT = {}
-
 class Logger(object):
+    """Logger is a wrapper around the collectd logging functions."""
     def __init__(self, prefix, verbose=False):
+        super(Logger, self).__init__()
         self.prefix = prefix
         self.verbose = verbose
 
-    def error(self, msg):
-        collectd.error('{name}: {msg}'.format(name=self.prefix, msg=msg))
+    def __repr__(self):
+        return '{prefix: "%s", verbose: "%s"}' % (self.prefix, self.verbose)
 
-    def notice(self, msg):
-        collectd.notice('{name}: {msg}'.format(name=self.prefix, msg=msg))
+    def _log(self, level, msg, params):
+        message = msg
+        if not params is None:
+            message = msg % params
+        message = '%s: %s' % (self.prefix, message)
 
-    def warn(self, msg):
-        collectd.warning('{name}: {msg}'.format(name=self.prefix, msg=msg))
+        if level is 'debug' and self.verbose:
+            # because we want our debug messages printed
+            # regardless of collectd's debug state
+            # we use the notice method
+            collectd.notice(message)
+        elif level is 'debug' and not self.verbose:
+            return
+        elif level is 'error':
+            collectd.error(message)
+        elif level is 'info':
+            collectd.info(message)
+        elif level is 'notice':
+            collectd.notice(message)
+        elif level is 'warn':
+            collectd.warning(message)
+        else:
+            collectd.info(message)
 
-    def debug(self, msg):
-        if self.verbose or VERBOSE_LOGGING:
-            collectd.info('{name}: {msg}'.format(name=self.prefix, msg=msg))
+    def debug(self, msg, *params):
+        self._log('debug', msg, params)
 
-log = Logger('haproxy global')
+    def error(self, msg, *params):
+        self._log('error', msg, params)
+
+    def info(self, msg, *params):
+        self._log('info', msg, params)
+
+    def notice(self, msg, *params):
+        self._log('notice', msg, params)
+
+    def warn(self, msg, *params):
+        self._log('warn', msg, params)
+
+# https://github.com/memsql/memsql-collectd/blob/master/memsql_collectd/plugin.py
+class _AttrDict(dict):
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+    def __setattr__(self, name, val):
+        self[name] = val
+
+class ConfigInstance(object):
+    def __init__(self, name = None, log = None):
+        super(ConfigInstance, self).__init__()
+        self.name = name
+        self.log = log
+        self.verbose = False
+        self.interval = 10
+        self.socket = '/var/run/haproxy.sock'
+        self.recv_size = 1024
+        self.proxies = _AttrDict(monitor=[], ignore=[])
+
+    def __repr__(self):
+        return '{name: "%s", verbose: "%s", interval: "%s", socket: "%s", recv_size: "%s", proxies: "%s"}' % (
+            self.name, self.verbose, self.interval, self.socket, self.recv_size, self.proxies)
+
+
+
+CONFIG = _AttrDict(
+    handler = None,
+    instances = [],
+    root = ConfigInstance('root', Logger(PLUGIN_NAME))
+)
 
 class HAProxySocket(object):
-    def __init__(self, socket_file):
+    def __init__(self, socket_file, recv_size = 1024):
+        self.recv_size = recv_size
         self.socket_file = socket_file
-        self.log = Logger('HAProxySocket', VERBOSE_LOGGING)
+        self.log = Logger('HAProxySocket', CONFIG.root.verbose)
 
     def connect(self):
-        self.log.debug('method: connect')
+        self.log.debug('connect')
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         s.connect(self.socket_file)
         return s
 
     def communicate(self, command):
-        self.log.debug('method: communicate')
+        self.log.debug('communicate')
         ''' Send a single command to the socket and return a single response (raw string) '''
         s = self.connect()
         if not command.endswith('\n'): command += '\n'
         s.send(command)
         result = ''
         buf = ''
-        buf = s.recv(RECV_SIZE)
+        buf = s.recv(self.recv_size)
         while buf:
             result += buf
-            buf = s.recv(RECV_SIZE)
+            buf = s.recv(self.recv_size)
         s.close()
         return result
 
     def get_server_info(self):
-        self.log.debug('method: get_server_info')
+        self.log.debug('get_server_info')
         result = {}
         output = self.communicate('show info')
         for line in output.splitlines():
@@ -132,161 +194,157 @@ class HAProxySocket(object):
             except ValueError, e:
                 continue
             result[key.strip()] = val.strip()
-        self.log.debug('server_info: %s' % result)
+        self.log.debug('server_info: %s', result)
         return result
 
     def get_server_stats(self):
-        self.log.debug('method: get_server_stats')
+        self.log.debug('get_server_stats')
         output = self.communicate('show stat')
         #sanitize and make a list of lines
         output = output.lstrip('# ').strip()
         output = [ l.strip(',') for l in output.splitlines() ]
         csvreader = csv.DictReader(output)
         result = [ d.copy() for d in csvreader ]
-        self.log.debug('server_stats: %s' % result)
+        self.log.debug('server_stats: %s', result)
         return result
 
-### Module functions
+class Handler(threading.Thread):
+    """
+        Handler is used to actually communicate with the HAProxy sockets
+        and send them to the remote Carbon server. Each interval will
+        get its own thread for doing all of the operations necessary to
+        complete the stats gathering and sending.
+    """
+    def __init__(self, config):
+        super(Handler, self).__init__()
+        self.log = Logger('handler', config.root.verbose)
+        self.config = config
 
-def get_stats(instance_config):
-    log.debug('function: get_stats')
-    instance_name, config_data = instance_config.items()[0]
-    try:
-        _log = config_data['log']
-    except:
-        _log = log
-    _log.debug("instance_name: %s" % instance_name)
-    _log.debug("config_data: %s" % config_data)
+    def get_stats(self, instance):
+        instance.log.debug('getting stats for instance: %s', instance.name)
 
-    stats = {}
-    haproxy = HAProxySocket(config_data['HAPROXY_SOCKET'])
+        stats = {}
+        haproxy = HAProxySocket(instance.socket, instance.recv_size)
 
-    try:
-        server_info = haproxy.get_server_info()
-        server_stats = haproxy.get_server_stats()
-    except socket.error, e:
-        _log.warn('status err Unable to connect to HAProxy socket at %s' %
-                  config_data['HAPROXY_SOCKET'])
+        try:
+            server_info = haproxy.get_server_info()
+            server_stats = haproxy.get_server_stats()
+        except socket.error, e:
+            instance.log.error('Unable to connect to HAProxy socket at %s',
+                      instance.socket)
+            return stats
+
+        metrics = METRIC_TYPES.keys()
+
+        if 'server' in instance.proxies.monitor:
+            for key, val in server_info.items():
+                if not key in metrics:
+                    continue
+                metricname = METRIC_DELIM.join([instance.name, key])
+                instance.log.debug('info metricname: %s', metricname)
+                try:
+                    stats[metricname] = int(val)
+                    instance.log.debug('%s = %s', metricname, stats[metricname])
+                except:
+                    instance.log.debug('could not parse value for: %s', metricname)
+                    pass
+
+        for statdict in server_stats:
+            if not ('all' in instance.proxies.monitor or
+                    '*' in instance.proxies.monitor or
+                    statdict['svname'].lower() in instance.proxies.monitor or
+                    statdict['pxname'].lower() in instance.proxies.monitor):
+                instance.log.debug('not processing proxy: %s', statdict['pxname'])
+                continue
+            if statdict['pxname'].lower() in instance.proxies.ignore:
+                instance.log.debug('ignoring proxy: %s', statdict['pxname'])
+                continue
+
+            for key, val in statdict.iteritems():
+                if not key in metrics:
+                    continue
+                metricname = METRIC_DELIM.join([instance.name,
+                                                statdict['pxname'].lower(), key])
+                instance.log.debug('stat metricname: %s', metricname)
+                try:
+                    stats[metricname] = int(val)
+                    instance.log.debug('%s = %s', metricname, stats[metricname])
+                except (TypeError, ValueError), e:
+                    instance.log.debug('cold not parse value for: %s', metricname)
+                    pass
+
+        instance.log.debug('stats: %s', stats)
         return stats
 
-    if 'server' in config_data['PROXY_MONITORS']:
-        for key, val in server_info.items():
-            if instance_name == 'root':
-                key_prefix = server_info['Name']
-            else:
-                key_prefix = instance_name + METRIC_DELIM + server_info['Name']
-            metricname = METRIC_DELIM.join([key_prefix , key])
-            _log.debug('metricname: %s' % metricname)
-            try:
-                stats[metricname] = int(val)
-                _log.debug('%s = %s' % (metricname, stats[metricname]))
-            except (TypeError, ValueError), e:
-                _log.debug('could not parse value for: %s' % metricname)
-                pass
+    def send_stats(self, instance, stats):
+        instance.log.debug('sending stats')
+        metrics = METRIC_TYPES.keys()
+        instance.log.debug('metrics: %s', metrics)
+        instance.log.debug('items: %s', stats.items())
+        for key, value in stats.iteritems():
+            instance.log.debug('stat: (%s, %s)', key, value)
+            key_prefix, key_root = key.rsplit(METRIC_DELIM, 1)
+            val = collectd.Values(plugin=key_prefix, type=METRIC_TYPES[key_root])
+            val.values = [value]
+            instance.log.debug('sending: (%s, %s)', val, value)
+            val.dispatch()
 
-    for statdict in server_stats:
-        if not ('all' in config_data['PROXY_MONITORS'] or \
-                '*' in config_data['PROXY_MONITORS']):
-            if not (statdict['svname'].lower() in config_data['PROXY_MONITORS'] or \
-                    statdict['pxname'].lower() in config_data['PROXY_MONITORS']):
-                _log.debug(
-                    '(svname = %s, pxname = %s) not being processed' %
-                    (statdict['svname'], statdict['pxname'])
-                )
-                continue
+    def run(self):
+        self.log.debug('config: %s', self.config)
+        stats = self.get_stats(self.config.root)
+        if len(stats.keys()) > 0:
+            self.send_stats(self.config.root, stats)
 
-            if statdict['pxname'] in config_data['PROXY_IGNORE']:
-                _log.debug('(pxname = %s) not being processed' % statdict['pxname'])
-                continue
+        for instance in self.config.instances:
+            stats = self.get_stats(instance)
+            if len(stats.keys()) > 0:
+                self.send_stats(instance, stats)
 
-        for key, val in statdict.items():
-            if instance_name == 'root':
-                key_prefix = statdict['svname']
-            else:
-                key_prefix = instance_name + METRIC_DELIM + statdict['svname']
-            metricname = METRIC_DELIM.join([key_prefix.lower(),
-                                            statdict['pxname'].lower(), key])
-        _log.debug('metricname: %s' % metricname)
-        try:
-            stats[metricname] = int(val)
-            _log.debug('%s = %s' % (metricname, stats[metricname]))
-        except (TypeError, ValueError), e:
-            _log.debug('cold not parse value for: %s' % metricname)
-            pass
-    return stats
+def init_callback(data):
+    data.handler = Handler(data)
+    collectd.register_read(data.handler.run)
 
-def get_instance_config(config_child, instance_name):
-    log.debug('function: get_instance_config')
-    instance_config = {
-        'PROXY_MONITORS': [],
-        'PROXY_IGNORE': [],
-        'HAPROXY_SOCKET': '/var/lib/haproxy/stats',
-        'VERBOSE_LOGGING': False
-    }
-
-    for node in config_child.children:
+def read_config_obj(config, instance):
+    for node in config.children:
+        if node.key == 'ReceiveSize':
+            instance.recv_size = node.values[0]
         if node.key == 'ProxyMonitor':
-            instance_config['PROXY_MONITORS'].append(node.values[0])
+            instance.proxies.monitor.append(node.values[0])
         elif node.key == 'ProxyIgnore':
-            instance_config['PROXY_IGNORE'].append(node.values[0])
+            instance.proxies.ignore.append(node.values[0])
         elif node.key == 'Socket':
-            instance_config['HAPROXY_SOCKET'] = node.values[0]
+            instance.socket = node.values[0]
         elif node.key == 'Verbose':
-            VERBOSE_LOGGING = bool(node.values[0])
-            instance_config['log'] = Logger(instance_name, VERBOSE_LOGGING)
+            verbose = bool(node.values[0])
+            instance.verbose = verbose
+            instance.log = Logger(instance.name, verbose)
         elif node.key == 'Instance':
             continue
         else:
-            log.warn('Unknown config key: %s' % node.key)
-
-        if not instance_config['PROXY_MONITORS']:
-            instance_config['PROXY_MONITORS'] = DEFAULT_PROXY_MONITORS
-        instance_config['PROXY_MONITORS'] = [p.lower() for p in
-                                             instance_config['PROXY_MONITORS']]
-
-    return instance_config
-
-def configure_callback(conf):
-    log.debug('function: configure_callback')
-    for node in conf.children:
-        if node.children:
-            # instance config
-            if node.key == 'Instance':
-                instance_name = node.values[0]
-            else:
-                instance_name = node.key
-            CONFIG_INSTANCES.append({
-                instance_name: get_instance_config(node, instance_name)
-            })
-        else:
-            # root config
-            CONFIG_ROOT = {'root': get_instance_config(conf, 'root')}
-
-def read_callback():
-    log.debug('function: read_callback')
-
-    if CONFIG_INSTANCES:
-        info = {}
-        for config_instance in CONFIG_INSTANCES:
-            info.update(get_stats(config_instance))
-            if not info:
-                log.warn('%s: No data received from %s instance' %
-                        (NAME, config_instance.keys()[0]))
-    else:
-        info = get_stats(CONFIG_ROOT)
-        if not info:
-            log.warn('%s: No data received' % NAME)
-
-    for key,value in info.iteritems():
-        key_prefix, key_root = key.rsplit(METRIC_DELIM,1)
-        if not key_root in METRIC_TYPES:
             continue
 
-        val = collectd.Values(plugin=NAME + METRIC_DELIM + key_prefix,
-                              type=METRIC_TYPES[key_root])
-        val.values = [value]
-        log.debug('%s, %s' % (val, value))
-        val.dispatch()
+    if instance.log is None:
+        instance.log = Logger(instance.name, instance.verbose)
 
-collectd.register_config(configure_callback)
-collectd.register_read(read_callback)
+    if len(instance.proxies.monitor) == 0:
+        instance.proxies.monitor = ['server', 'frontend', 'backend']
+    instance.proxies.monitor = [p.lower() for p in instance.proxies.monitor]
+    if len(instance.proxies.ignore) > 0:
+        instance.proxies.ignore = [p.lower() for p in instance.proxies.lower]
+    instance.log.debug('instance: %s', instance)
+
+def config_callback(config, data):
+    if config.key.lower() == 'module':
+        # root node
+        read_config_obj(config, data.root)
+        for node in config.children:
+            # instance nodes
+            if len(node.values) == 0:
+                continue
+            if node.key.lower() == 'instance':
+                instance = ConfigInstance(name = node.values[0])
+                read_config_obj(node, instance)
+                data.instances.append(instance)
+
+collectd.register_init(init_callback, CONFIG)
+collectd.register_config(config_callback, CONFIG)

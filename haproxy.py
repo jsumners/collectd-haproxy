@@ -291,14 +291,14 @@ class Handler(threading.Thread):
 
     def run(self):
         self.log.debug('config: %s', self.config)
-        stats = self.get_stats(self.config.root)
-        if len(stats.keys()) > 0:
-            self.send_stats(self.config.root, stats)
-
-        for instance in self.config.instances:
+        if len(self.config.instances) > 0:
             stats = self.get_stats(instance)
             if len(stats.keys()) > 0:
                 self.send_stats(instance, stats)
+        else:
+            stats = self.get_stats(self.config.root)
+            if len(stats.keys()) > 0:
+                self.send_stats(self.config.root, stats)
 
 def init_callback(data):
     data.handler = Handler(data)

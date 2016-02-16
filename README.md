@@ -36,7 +36,9 @@ Options
 * `Instance`
   There are situations when multiple instances of HAProxy needs to run on
   the same host. Each `Instance` block supports all configuration properties
-  except for the `Instance` configuration property.
+  except for the `Instance` configuration property. When at least one
+  `Instance` block is present, the root block is assumed to not have any
+  sockets to read.
 
 Example
 -------
